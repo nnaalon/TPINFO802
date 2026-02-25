@@ -81,7 +81,4 @@ if __name__ == '__main__':
         WsgiApplication(application)
     )
 
-    print("Service SOAP EV Calculator disponible sur http://0.0.0.0:8000")
-    print("WSDL : http://0.0.0.0:8000/?wsdl")
-
     server.serve_forever()

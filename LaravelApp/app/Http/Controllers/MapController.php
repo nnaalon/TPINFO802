@@ -41,8 +41,18 @@ class MapController extends Controller
                     // 4️⃣ Calcul des bornes nécessaires
                     if ($selectedVehicleId) {
                         $stationsOnRoute = $this->getRequiredChargingStops($routeCoordinates, $selectedVehicleId, $routeDistanceKm);
+
+                        // 5️⃣ Recalculer le trajet en passant par les bornes
+                        if (!empty($stationsOnRoute)) {
+                            $finalRouteData = $this->getRoute($startCoords, $endCoords, $stationsOnRoute);
+                            if ($finalRouteData) {
+                                $routeCoordinates = $finalRouteData['coordinates'];
+                                $routeDistanceKm  = $finalRouteData['distance_km'];
+                            }
+                        }
                     }
-                    // 5️⃣ Calcul du temps total via SOAP
+
+                    // 6️⃣ Calcul du temps total via SOAP
                     if ($selectedVehicleId) {
                         $totalTravelTimeMin = $this->calculateTravelTimeSOAP($selectedVehicleId, $routeDistanceKm);
                     }
@@ -85,20 +95,26 @@ class MapController extends Controller
         return null;
     }
 
-    private function getRoute(array $startCoords, array $endCoords): ?array
+    private function getRoute(array $startCoords, array $endCoords, array $waypoints = []): ?array
     {
-        $url = "http://router.project-osrm.org/route/v1/driving/"
-            . "{$startCoords['lon']},{$startCoords['lat']};"
-            . "{$endCoords['lon']},{$endCoords['lat']}"
-            . "?overview=full&geometries=geojson";
+        // Construire la liste des points : départ → bornes → arrivée
+        $coords = "{$startCoords['lon']},{$startCoords['lat']}";
 
-        $response = Http::get($url);
+        foreach ($waypoints as $wp) {
+            $coords .= ";{$wp['lon']},{$wp['lat']}";
+        }
+
+        $coords .= ";{$endCoords['lon']},{$endCoords['lat']}";
+
+        $url = "http://router.project-osrm.org/route/v1/driving/{$coords}?overview=full&geometries=geojson";
+
+        $response = Http::timeout(15)->get($url);
 
         if ($response->successful() && isset($response->json()['routes'][0])) {
             $route = $response->json()['routes'][0];
             return [
                 'coordinates' => $route['geometry']['coordinates'],
-                'distance_km' => $route['distance'] / 1000, // OSRM retourne en mètres 
+                'distance_km' => $route['distance'] / 1000,
             ];
         }
 
@@ -155,16 +171,22 @@ class MapController extends Controller
                 $lat = (float) $point[1];
                 $lon = (float) $point[0];
                 
-                $nearby = $chargingController->getNearbyStations($lat, $lon, '5000'); // 10000m = 10km
+                $nearby = $chargingController->getNearbyStations($lat, $lon, 15000); // 15km de rayon pour plus de choix
                 
                 if (!empty($nearby)) {
-                    $stations[] = $nearby[0];
+                    // Choisir la borne qui minimise le détour : la plus proche du point de route
+                    $bestStation = collect($nearby)
+                        ->sortBy(fn($s) => $this->haversineDistance(
+                            $lat, $lon,
+                            (float) $s['lat'], (float) $s['lon']
+                        ))
+                        ->first();
+
+                    $stations[] = $bestStation;
                     $distanceCovered = 0; // Reset après recharge
                     $autonomyRemaining = $rangeKm; // Recharge complète
-                } else {
-                    // Même si pas de borne trouvée, on continue quand même
-                    $distanceCovered = 0;
                 }
+                // Si pas de borne trouvée : on ne reset pas, on continue à chercher au prochain point
             }
 
             $prevPoint = $point;
@@ -174,7 +196,7 @@ class MapController extends Controller
         session(['debug_search_count' => $searchCount]);
         session(['debug_sampled_points' => count($sampledPoints)]);
 
-        return collect($stations)->unique('id_station')->values()->all();
+        return collect($stations)->unique('id')->values()->all();
     }
 
     private function calculateTravelTimeSOAP(string $vehicleId, float $distanceKm): ?float
