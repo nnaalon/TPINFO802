@@ -213,7 +213,8 @@ class MapController extends Controller
         $chargingTimeMin = 30;
 
         try {
-            $client = new \SoapClient('http://localhost:8000/?wsdl');
+            $soapUrl = env('SOAP_URL', 'http://localhost:8000');
+            $client = new \SoapClient("{$soapUrl}/?wsdl");
 
             $params = [
                 'distance_km' => $distanceKm,

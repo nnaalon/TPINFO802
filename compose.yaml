@@ -2,6 +2,18 @@ services:
   api-soap:
     build:
       context: ./SoapServer
-    ports: 
+    ports:
       - "8000:8000"
-    command: ["python","server.py"]
+    command: ["python", "server.py"]
+
+  laravel:
+    build:
+      context: ./LaravelApp
+    ports:
+      - "8080:80"
+    environment:
+      - APP_ENV=production
+      - APP_KEY=base64:CHANGE_ME
+      - SOAP_URL=http://api-soap:8000
+    depends_on:
+      - api-soap
