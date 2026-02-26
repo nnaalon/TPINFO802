@@ -213,7 +213,7 @@ class MapController extends Controller
         $chargingTimeMin = 30;
 
         try {
-            $soapUrl = env('SOAP_URL', 'http://localhost:8000');
+            $soapUrl = env('SOAP_URL', 'https://tpinfo802.onrender.com');
             $client = new \SoapClient("{$soapUrl}/?wsdl");
 
             $params = [
